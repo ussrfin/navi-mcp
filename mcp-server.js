@@ -236,30 +236,22 @@ async function getPrice(params) {
   };
 }
 
-// GET /sse - For old HTTP+SSE transport (2024-11-05 backward compatibility)
+// GET /sse - Streamable HTTP: Keep-alive SSE stream for server-initiated messages
 app.get("/sse", (req, res) => {
-  console.log("GET /sse - Opening SSE stream (old transport)");
+  console.log("GET /sse - Opening SSE stream");
   
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("Access-Control-Allow-Origin", "*");
   
-  // Send endpoint event for old transport
-  const endpointEvent = {
-    jsonrpc: "2.0",
-    method: "endpoint",
-    params: {
-      endpoint: "/messages"
-    }
-  };
+  // Send keepalive immediately
+  res.write(': ping\n\n');
   
-  res.write(`data: ${JSON.stringify(endpointEvent)}\n\n`);
-  
-  // Keep connection alive
+  // Keep connection alive with periodic pings
   const keepAlive = setInterval(() => {
-    res.write(': keepalive\n\n');
-  }, 15000);
+    res.write(': ping\n\n');
+  }, 30000);
   
   req.on('close', () => {
     clearInterval(keepAlive);
@@ -267,18 +259,10 @@ app.get("/sse", (req, res) => {
   });
 });
 
-// POST /messages - For old HTTP+SSE transport
-app.post("/messages", async (req, res) => {
-  const message = req.body;
-  console.log("Received MCP message at /messages:", JSON.stringify(message, null, 2));
-  
-  await handleMcpMessage(message, res);
-});
-
-// MCP Streamable HTTP endpoint (new transport)
+// POST /sse - Streamable HTTP: Main endpoint for MCP requests
 app.post("/sse", async (req, res) => {
   const message = req.body;
-  console.log("Received MCP message at /sse:", JSON.stringify(message, null, 2));
+  console.log("POST /sse - Received MCP message:", JSON.stringify(message, null, 2));
   
   await handleMcpMessage(message, res);
 });
