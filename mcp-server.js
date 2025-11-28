@@ -449,13 +449,88 @@ app.get("/", (req, res) => {
     name: "Navi MCP Server",
     version: "1.0.0",
     status: "running",
-    protocol: "MCP Streamable HTTP",
-    endpoint: "/sse"
+    protocol: "MCP Streamable HTTP + REST Webhooks",
+    endpoints: {
+      mcp: "/sse",
+      webhooks: ["/tools/get_stock", "/tools/get_reservation", "/tools/get_price"]
+    }
   });
+});
+
+// ==========================================
+// WEBHOOK ENDPOINTS (for ElevenLabs Server Tools)
+// ==========================================
+
+// Webhook: Get Stock
+app.post("/tools/get_stock", async (req, res) => {
+  try {
+    console.log("[Webhook] get_stock called with:", JSON.stringify(req.body));
+    
+    const { costume, size } = req.body;
+    const result = await getStock({ costume, size });
+    
+    // Return plain text response (ElevenLabs expects text)
+    res.json({
+      success: true,
+      data: result.content[0].text
+    });
+  } catch (error) {
+    console.error("[Webhook] get_stock error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Webhook: Get Reservation
+app.post("/tools/get_reservation", async (req, res) => {
+  try {
+    console.log("[Webhook] get_reservation called with:", JSON.stringify(req.body));
+    
+    const { cosplay, size, tanggal } = req.body;
+    const result = await getReservation({ cosplay, size, tanggal });
+    
+    res.json({
+      success: true,
+      data: result.content[0].text
+    });
+  } catch (error) {
+    console.error("[Webhook] get_reservation error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Webhook: Get Price
+app.post("/tools/get_price", async (req, res) => {
+  try {
+    console.log("[Webhook] get_price called with:", JSON.stringify(req.body));
+    
+    const { cosplay, tier } = req.body;
+    const result = await getPrice({ cosplay, tier });
+    
+    res.json({
+      success: true,
+      data: result.content[0].text
+    });
+  } catch (error) {
+    console.error("[Webhook] get_price error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Navi MCP Server running on port ${PORT}`);
   console.log(`🔗 MCP Endpoint: POST /sse`);
+  console.log(`🔧 Webhook Endpoints:`);
+  console.log(`   POST /tools/get_stock`);
+  console.log(`   POST /tools/get_reservation`);
+  console.log(`   POST /tools/get_price`);
   console.log(`📋 Health check: GET /`);
 });
