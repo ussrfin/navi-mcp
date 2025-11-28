@@ -179,7 +179,29 @@ async function getPrice(params) {
   };
 }
 
-// MCP Streamable HTTP endpoint
+// MCP Streamable HTTP endpoint - GET for SSE stream
+app.get("/sse", (req, res) => {
+  console.log("GET /sse - Opening SSE stream");
+  
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  
+  // Keep connection alive
+  res.write(": ping\n\n");
+  
+  const keepAlive = setInterval(() => {
+    res.write(": ping\n\n");
+  }, 30000);
+  
+  req.on("close", () => {
+    clearInterval(keepAlive);
+    console.log("SSE stream closed");
+  });
+});
+
+// MCP Streamable HTTP endpoint - POST for requests
 app.post("/sse", async (req, res) => {
   const message = req.body;
   
