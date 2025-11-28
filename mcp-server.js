@@ -22,10 +22,52 @@ app.use((req, res, next) => {
 
 // Tools implementation
 async function getStock(params) {
-  const { costume, size } = params;
-  const response = await fetch(STOCK_URL);
-  const data = await response.json();
-  const rows = data.results || data;
+  try {
+    console.log("[get_stock] Called with params:", JSON.stringify(params));
+    
+    const { costume, size } = params;
+    
+    if (!costume) {
+      return {
+        content: [{
+          type: "text",
+          text: "Error: Parameter 'costume' is required"
+        }],
+        isError: true
+      };
+    }
+    
+    console.log("[get_stock] Fetching from:", STOCK_URL);
+    const response = await fetch(STOCK_URL);
+    
+    if (!response.ok) {
+      console.error("[get_stock] Fetch error:", response.status, response.statusText);
+      return {
+        content: [{
+          type: "text",
+          text: `Error fetching stock data: ${response.statusText}`
+        }],
+        isError: true
+      };
+    }
+    
+    const data = await response.json();
+    console.log("[get_stock] Data received:", data ? "Yes" : "No");
+    
+    const rows = data.results || data;
+    
+    if (!Array.isArray(rows)) {
+      console.error("[get_stock] Invalid data format, not an array");
+      return {
+        content: [{
+          type: "text",
+          text: "Error: Invalid data format from stock database"
+        }],
+        isError: true
+      };
+    }
+    
+    console.log("[get_stock] Total rows:", rows.length);
 
   const lower = costume.toLowerCase();
   const match = rows.find((row) => {
@@ -76,12 +118,24 @@ async function getStock(params) {
 
   result += `\n\n📦 Includes: ${match.Includes}`;
 
+  console.log("[get_stock] Success, returning result");
+  
   return {
     content: [{
       type: "text",
       text: result
     }]
   };
+  } catch (error) {
+    console.error("[get_stock] Error:", error.message);
+    return {
+      content: [{
+        type: "text",
+        text: `Error: ${error.message}`
+      }],
+      isError: true
+    };
+  }
 }
 
 async function getReservation(params) {
