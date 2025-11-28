@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "description": "MCP Server untuk Navi AI Agent - Real-time Google Sheets Integration",
   "type": "module",
-  "main": "mcp-server-http.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node mcp-server-http.js",
+    "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": ["mcp", "elevenlabs", "google-sheets", "ai-agent"],
