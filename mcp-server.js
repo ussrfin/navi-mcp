@@ -1,288 +1,376 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import express from "express";
 import fetch from "node-fetch";
-import { z } from "zod";
 
-// URLs untuk ketiga Google Sheets Apps Script endpoints
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// URLs untuk Google Sheets
 const STOCK_URL = "https://script.google.com/macros/s/AKfycbxwJ7ht-S4EzizZxkXUjkrl5PnL3nxuC4nLN-hmDMDUWSHpgdX11ucSRDy-9AiY6eI1jA/exec";
 const RESERVATION_URL = "https://script.google.com/macros/s/AKfycbxPa5Bu_B-q-A925YhFF-JFW9iRDEuGI7hfKq5jSMlUHmBM46ZmsCmekG7uRQ19Zoa9/exec";
 const PRICE_CATALOG_URL = "https://script.google.com/macros/s/AKfycbzStu9JYQmMWJTdASLaMnBq7BkNtMfIytK5KW4e5IzUD__MBEWsq_Vq-Vlyhdw8t4Mh/exec";
 
-const server = new McpServer({
-  name: "navi-stock-server",
-  version: "1.0.0",
+app.use(express.json());
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
 });
 
-// Tool 1: get_stock
-server.tool(
-  "get_stock",
-  "Get costume stock availability with all details including size, ETA, tier, and includes",
-  {
-    costume: z.string().describe("Nama kostum, contoh: Hu Tao"),
-    size: z.string().optional().describe("Ukuran: S/M/L/XL (optional)"),
-  },
-  async ({ costume, size }) => {
-    try {
-      const res = await fetch(STOCK_URL);
-      const rows = await res.json();
+// Tools implementation
+async function getStock(params) {
+  const { costume, size } = params;
+  const response = await fetch(STOCK_URL);
+  const rows = await response.json();
 
-      const lower = costume.toLowerCase();
+  const lower = costume.toLowerCase();
+  const match = rows.find((row) => {
+    const name = (row.Costume || "").toLowerCase();
+    return name.includes(lower);
+  });
 
-      const match = rows.find((row) => {
-        const name = (row.Costume || "").toLowerCase();
-        return name.includes(lower);
-      });
+  if (!match) {
+    return {
+      content: [{
+        type: "text",
+        text: `Costume "${costume}" tidak ditemukan di stock`
+      }]
+    };
+  }
 
-      if (!match) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Costume "${costume}" tidak ditemukan di stock`,
-            },
-          ],
-        };
-      }
+  let result = `**${match.Costume}**\n\n`;
+  result += `📸 ${match.ImageURL}\n\n`;
+  result += `🏷️ ${match.Tagline || match["Tagline/CosplayLevel"]}\n`;
+  result += `💰 Tier: ${match.Tier}\n`;
+  result += `📏 Size Available: ${match.SizeAvailable}\n\n`;
 
-      // Jika size spesifik diminta, cek ketersediaan
-      let sizeInfo = {};
-      if (size) {
-        const upperSize = size.toUpperCase();
-        const availableSizes = (match.SizeAvailable || "").toUpperCase();
+  if (size) {
+    const upperSize = size.toUpperCase();
+    const availableSizes = (match.SizeAvailable || "").toUpperCase();
 
-        if (!availableSizes.includes(upperSize)) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Costume "${match.Costume}" tersedia, tapi size ${upperSize} tidak ada. Size available: ${match.SizeAvailable}`,
-              },
-            ],
-          };
-        }
-
-        // Get ETA untuk size spesifik
-        let etaField = `ETA ${upperSize}`;
-        const eta = (match[etaField] || "").toString().trim();
-
-        sizeInfo = {
-          size: upperSize,
-          eta: eta,
-          status: eta && eta !== "-" ? `Disewa sampai ${eta}` : "Available sekarang",
-        };
-      }
-
-      // Return semua data kolom
-      const result = {
-        found: true,
-        costume: match.Costume || "",
-        imageURL: match.ImageURL || "",
-        tagline: match.Tagline || match["Tagline/CosplayLevel"] || "",
-        tier: match.Tier || "",
-        rys: match.RYS || "",
-        sizeAvailable: match.SizeAvailable || "",
-        etaS: match["ETA S"] || "",
-        etaM: match["ETA M"] || "",
-        etaL: match["ETA L"] || "",
-        etaXL: match["ETA XL"] || "",
-        includes: match.Includes || "",
-        ...sizeInfo,
-      };
-
+    if (!availableSizes.includes(upperSize)) {
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error: ${error.message}`,
-          },
-        ],
-        isError: true,
+        content: [{
+          type: "text",
+          text: `Costume "${match.Costume}" tersedia, tapi size ${upperSize} tidak ada.\n\nSize available: ${match.SizeAvailable}`
+        }]
       };
     }
+
+    let etaField = `ETA ${upperSize}`;
+    const eta = (match[etaField] || "").toString().trim();
+    
+    result += `**Size ${upperSize}:**\n`;
+    result += eta && eta !== "-" ? `⏰ Disewa sampai: ${eta}` : `✅ Available sekarang`;
+  } else {
+    result += `**ETA per Size:**\n`;
+    result += `- S: ${match["ETA S"] || "Available"}\n`;
+    result += `- M: ${match["ETA M"] || "Available"}\n`;
+    result += `- L: ${match["ETA L"] || "Available"}\n`;
+    result += `- XL: ${match["ETA XL"] || "Available"}`;
   }
-);
 
-// Tool 2: get_reservation
-server.tool(
-  "get_reservation",
-  "Get reservation/booking information for a costume on specific date",
-  {
-    cosplay: z.string().describe("Nama cosplay/costume yang direservasi"),
-    size: z.string().optional().describe("Ukuran: S/M/L/XL (optional)"),
-    tanggal: z.string().optional().describe("Tanggal dalam format YYYY-MM-DD, contoh: 2025-12-02 (optional)"),
-  },
-  async ({ cosplay, size, tanggal }) => {
-    try {
-      const res = await fetch(RESERVATION_URL);
-      const rows = await res.json();
+  result += `\n\n📦 Includes: ${match.Includes}`;
 
-      const lower = cosplay.toLowerCase();
-
-      // Filter berdasarkan cosplay name
-      let matches = rows.filter((row) => {
-        const name = (row.Cosplay || "").toLowerCase();
-        return name.includes(lower);
-      });
-
-      // Filter berdasarkan size jika ada
-      if (size) {
-        const upperSize = size.toUpperCase();
-        matches = matches.filter((row) => {
-          const rowSize = (row.Size || "").toUpperCase();
-          return rowSize === upperSize;
-        });
-      }
-
-      // Filter berdasarkan tanggal jika ada
-      if (tanggal) {
-        matches = matches.filter((row) => {
-          const rowTanggal = (row.Tanggal || "").toString();
-          return rowTanggal.includes(tanggal);
-        });
-      }
-
-      if (matches.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Tidak ada reservasi ditemukan untuk "${cosplay}"${size ? ` size ${size}` : ""}${tanggal ? ` pada tanggal ${tanggal}` : ""}`,
-            },
-          ],
-        };
-      }
-
-      // Return semua reservasi yang match
-      const result = {
-        found: true,
-        count: matches.length,
-        reservations: matches.map((row) => ({
-          nama: row.Nama || "",
-          cosplay: row.Cosplay || "",
-          size: row.Size || "",
-          tier: row.Tier || "",
-          rys: row.RYS || "",
-          additional: row.Additional || "",
-          price: row.Price || "",
-          tanggal: row.Tanggal || "",
-        })),
-      };
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error: ${error.message}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-  }
-);
-
-// Tool 3: get_price
-server.tool(
-  "get_price",
-  "Get price catalog information including rental price, brand, series, and purchase price",
-  {
-    cosplay: z.string().describe("Nama cosplay/costume"),
-    tier: z.string().optional().describe("Tier level (optional): Tier 1, Tier 2, Tier 3"),
-  },
-  async ({ cosplay, tier }) => {
-    try {
-      const res = await fetch(PRICE_CATALOG_URL);
-      const rows = await res.json();
-
-      const lower = cosplay.toLowerCase();
-
-      let match = rows.find((row) => {
-        const name = (row.Cosplay || "").toLowerCase();
-        const matchName = name.includes(lower);
-
-        // Jika tier dispesifikkan, filter juga berdasarkan tier
-        if (tier) {
-          const rowTier = (row.Tier || "").toLowerCase();
-          const targetTier = tier.toLowerCase();
-          return matchName && rowTier.includes(targetTier);
-        }
-
-        return matchName;
-      });
-
-      if (!match) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Costume "${cosplay}"${tier ? ` tier ${tier}` : ""} tidak ditemukan di price catalog`,
-            },
-          ],
-        };
-      }
-
-      // Return semua data price catalog
-      const result = {
-        found: true,
-        cosplay: match.Cosplay || "",
-        series: match.Series || "",
-        brand: match.Brand || "",
-        tier: match.Tier || "",
-        rys: match.RYS || "",
-        ppr: match.PPR || "",
-        purchase: match.Purchase || "",
-      };
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Error: ${error.message}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-  }
-);
-
-// Main function
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("✅ Navi MCP Server running (Node.js)");
-  console.error("📊 Tools available: get_stock, get_reservation, get_price");
-  console.error("🔗 Connected to Google Sheets via Apps Script");
+  return {
+    content: [{
+      type: "text",
+      text: result
+    }]
+  };
 }
 
-main().catch((err) => {
-  console.error("❌ Fatal error:", err);
-  process.exit(1);
+async function getReservation(params) {
+  const { cosplay, size, tanggal } = params;
+  const response = await fetch(RESERVATION_URL);
+  const rows = await response.json();
+
+  const lower = cosplay.toLowerCase();
+  let matches = rows.filter((row) => {
+    const name = (row.Cosplay || "").toLowerCase();
+    return name.includes(lower);
+  });
+
+  if (size) {
+    const upperSize = size.toUpperCase();
+    matches = matches.filter((row) => {
+      const rowSize = (row.Size || "").toUpperCase();
+      return rowSize === upperSize;
+    });
+  }
+
+  if (tanggal) {
+    matches = matches.filter((row) => {
+      const rowTanggal = (row.Tanggal || "").toString();
+      return rowTanggal.includes(tanggal);
+    });
+  }
+
+  if (matches.length === 0) {
+    return {
+      content: [{
+        type: "text",
+        text: `Tidak ada reservasi untuk "${cosplay}"${size ? ` size ${size}` : ""}${tanggal ? ` pada ${tanggal}` : ""}`
+      }]
+    };
+  }
+
+  let result = `**Reservasi ditemukan (${matches.length})**\n\n`;
+  matches.forEach((row, idx) => {
+    result += `${idx + 1}. **${row.Cosplay}** (${row.Size})\n`;
+    result += `   👤 ${row.Nama}\n`;
+    result += `   📅 ${row.Tanggal}\n`;
+    result += `   💰 ${row.Price}\n`;
+    result += `   📦 Additional: ${row.Additional || "-"}\n\n`;
+  });
+
+  return {
+    content: [{
+      type: "text",
+      text: result
+    }]
+  };
+}
+
+async function getPrice(params) {
+  const { cosplay, tier } = params;
+  const response = await fetch(PRICE_CATALOG_URL);
+  const rows = await response.json();
+
+  const lower = cosplay.toLowerCase();
+  const match = rows.find((row) => {
+    const name = (row.Cosplay || "").toLowerCase();
+    const matchName = name.includes(lower);
+
+    if (tier) {
+      const rowTier = (row.Tier || "").toLowerCase();
+      const targetTier = tier.toLowerCase();
+      return matchName && rowTier.includes(targetTier);
+    }
+
+    return matchName;
+  });
+
+  if (!match) {
+    return {
+      content: [{
+        type: "text",
+        text: `Costume "${cosplay}"${tier ? ` tier ${tier}` : ""} tidak ditemukan di price catalog`
+      }]
+    };
+  }
+
+  let result = `**${match.Cosplay}**\n\n`;
+  result += `🎭 Series: ${match.Series}\n`;
+  result += `🏢 Brand: ${match.Brand}\n`;
+  result += `💰 Tier: ${match.Tier}\n`;
+  result += `📅 RYS: Rp ${match.RYS}\n`;
+  result += `🎫 PPR: Rp ${match.PPR}\n`;
+  result += `🛒 Purchase: Rp ${match.Purchase}`;
+
+  return {
+    content: [{
+      type: "text",
+      text: result
+    }]
+  };
+}
+
+// MCP Streamable HTTP endpoint
+app.post("/sse", async (req, res) => {
+  const message = req.body;
+  
+  console.log("Received MCP message:", JSON.stringify(message, null, 2));
+
+  // Handle Initialize request
+  if (message.method === "initialize") {
+    const response = {
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        protocolVersion: "2024-11-05",
+        serverInfo: {
+          name: "Navi MCP Server",
+          version: "1.0.0"
+        },
+        capabilities: {
+          tools: {}
+        }
+      }
+    };
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    
+    res.write(`data: ${JSON.stringify(response)}\n\n`);
+    res.end();
+    return;
+  }
+
+  // Handle tools/list request
+  if (message.method === "tools/list") {
+    const response = {
+      jsonrpc: "2.0",
+      id: message.id,
+      result: {
+        tools: [
+          {
+            name: "get_stock",
+            description: "Get costume stock availability from Google Sheets. Returns stock info including sizes, ETA, and availability.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                costume: {
+                  type: "string",
+                  description: "Name of the costume to search (e.g., 'Gojo', 'Sukuna', 'Tanjiro')"
+                },
+                size: {
+                  type: "string",
+                  description: "Optional: Specific size to check (S, M, L, XL)",
+                  enum: ["S", "M", "L", "XL"]
+                }
+              },
+              required: ["costume"]
+            }
+          },
+          {
+            name: "get_reservation",
+            description: "Get reservation information from Google Sheets. Shows who rented what costume and when.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                cosplay: {
+                  type: "string",
+                  description: "Name of the cosplay to search"
+                },
+                size: {
+                  type: "string",
+                  description: "Optional: Filter by size (S, M, L, XL)"
+                },
+                tanggal: {
+                  type: "string",
+                  description: "Optional: Filter by date (e.g., '12/25', '2024-12')"
+                }
+              },
+              required: ["cosplay"]
+            }
+          },
+          {
+            name: "get_price",
+            description: "Get price catalog from Google Sheets. Shows rental prices (RYS, PPR) and purchase price.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                cosplay: {
+                  type: "string",
+                  description: "Name of the cosplay to search"
+                },
+                tier: {
+                  type: "string",
+                  description: "Optional: Filter by tier (Basic, Medium, Premium, etc.)"
+                }
+              },
+              required: ["cosplay"]
+            }
+          }
+        ]
+      }
+    };
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    
+    res.write(`data: ${JSON.stringify(response)}\n\n`);
+    res.end();
+    return;
+  }
+
+  // Handle tools/call request
+  if (message.method === "tools/call") {
+    const toolName = message.params.name;
+    const toolParams = message.params.arguments || {};
+
+    try {
+      let result;
+      
+      if (toolName === "get_stock") {
+        result = await getStock(toolParams);
+      } else if (toolName === "get_reservation") {
+        result = await getReservation(toolParams);
+      } else if (toolName === "get_price") {
+        result = await getPrice(toolParams);
+      } else {
+        throw new Error(`Unknown tool: ${toolName}`);
+      }
+
+      const response = {
+        jsonrpc: "2.0",
+        id: message.id,
+        result: result
+      };
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      
+      res.write(`data: ${JSON.stringify(response)}\n\n`);
+      res.end();
+    } catch (error) {
+      const errorResponse = {
+        jsonrpc: "2.0",
+        id: message.id,
+        error: {
+          code: -32603,
+          message: error.message
+        }
+      };
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      
+      res.write(`data: ${JSON.stringify(errorResponse)}\n\n`);
+      res.end();
+    }
+    return;
+  }
+
+  // Unknown method
+  const errorResponse = {
+    jsonrpc: "2.0",
+    id: message.id,
+    error: {
+      code: -32601,
+      message: `Method not found: ${message.method}`
+    }
+  };
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  
+  res.write(`data: ${JSON.stringify(errorResponse)}\n\n`);
+  res.end();
+});
+
+// Health check
+app.get("/", (req, res) => {
+  res.json({
+    name: "Navi MCP Server",
+    version: "1.0.0",
+    status: "running",
+    protocol: "MCP Streamable HTTP",
+    endpoint: "/sse"
+  });
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Navi MCP Server running on port ${PORT}`);
+  console.log(`🔗 MCP Endpoint: POST /sse`);
+  console.log(`📋 Health check: GET /`);
 });
