@@ -24,7 +24,8 @@ app.use((req, res, next) => {
 async function getStock(params) {
   const { costume, size } = params;
   const response = await fetch(STOCK_URL);
-  const rows = await response.json();
+  const data = await response.json();
+  const rows = data.results || data;
 
   const lower = costume.toLowerCase();
   const match = rows.find((row) => {
@@ -86,7 +87,8 @@ async function getStock(params) {
 async function getReservation(params) {
   const { cosplay, size, tanggal } = params;
   const response = await fetch(RESERVATION_URL);
-  const rows = await response.json();
+  const data = await response.json();
+  const rows = data.results || data;
 
   const lower = cosplay.toLowerCase();
   let matches = rows.filter((row) => {
@@ -138,7 +140,8 @@ async function getReservation(params) {
 async function getPrice(params) {
   const { cosplay, tier } = params;
   const response = await fetch(PRICE_CATALOG_URL);
-  const rows = await response.json();
+  const data = await response.json();
+  const rows = data.results || data;
 
   const lower = cosplay.toLowerCase();
   const match = rows.find((row) => {
@@ -179,29 +182,7 @@ async function getPrice(params) {
   };
 }
 
-// MCP Streamable HTTP endpoint - GET for SSE stream
-app.get("/sse", (req, res) => {
-  console.log("GET /sse - Opening SSE stream");
-  
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  
-  // Keep connection alive
-  res.write(": ping\n\n");
-  
-  const keepAlive = setInterval(() => {
-    res.write(": ping\n\n");
-  }, 30000);
-  
-  req.on("close", () => {
-    clearInterval(keepAlive);
-    console.log("SSE stream closed");
-  });
-});
-
-// MCP Streamable HTTP endpoint - POST for requests
+// MCP Streamable HTTP endpoint
 app.post("/sse", async (req, res) => {
   const message = req.body;
   
