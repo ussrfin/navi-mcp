@@ -269,28 +269,61 @@ server.tool(
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Middleware
+app.use(express.json());
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+// Health check
 app.get("/", (req, res) => {
   res.json({
     status: "running",
     service: "Navi MCP Server",
     version: "1.0.0",
+    transport: "SSE",
+    endpoint: "/sse",
     tools: ["get_stock", "get_reservation", "get_price"],
   });
 });
 
+// SSE endpoint
 app.get("/sse", async (req, res) => {
-  const transport = new SSEServerTransport("/messages", res);
-  await server.connect(transport);
+  console.log("📡 New SSE connection");
+  
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+  });
+
+  try {
+    const transport = new SSEServerTransport("/messages", res);
+    await server.connect(transport);
+    console.log("✅ MCP server connected via SSE");
+  } catch (error) {
+    console.error("❌ SSE connection error:", error);
+    res.end();
+  }
 });
 
-app.post("/messages", async (req, res) => {
-  // Handle messages here if needed
+// Messages endpoint for POST requests
+app.post("/messages", express.json(), async (req, res) => {
+  console.log("📨 Received message:", req.body);
   res.json({ status: "ok" });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Navi MCP Server running on port ${PORT}`);
   console.log(`📊 Tools available: get_stock, get_reservation, get_price`);
   console.log(`🔗 Connected to Google Sheets via Apps Script`);
-  console.log(`🌐 SSE endpoint: http://localhost:${PORT}/sse`);
+  console.log(`🌐 SSE endpoint: http://0.0.0.0:${PORT}/sse`);
+  console.log(`🌐 Public URL: https://navi-mcp-production.up.railway.app/sse`);
 });
